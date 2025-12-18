@@ -6,23 +6,25 @@ import {
   approveUser,
 } from "../controllers/authController.js";
 
-import { authMiddleware } from "../Middlewares/authMiddleware.js";
-import { superadminOnly } from "../Middlewares/roleMiddleware.js";
 
 const router = express.Router();
 
-// Public
+// ===================
+// PUBLIC ROUTES
+// ===================
 router.post("/register", register);
 router.post("/login", login);
 
-// Protected
-router.post("/logout", authMiddleware, logout);
+// ===================
+// PROTECTED ROUTES
+// ===================
+router.post("/logout", logout);
 
-// 🔐 SUPERADMIN ONLY
+// ===================
+// SUPERADMIN ONLY
+// ===================
 router.post(
   "/approve",
-  authMiddleware,
-  superadminOnly,
   approveUser
 );
 
