@@ -3,21 +3,9 @@ import fs from "fs";
 import path from "path";
 import { pool } from "../src/db.js";
 import ExcelJS from "exceljs";
-
+import jwt from "jsonwebtoken";
 import pgCopyStreams from "pg-copy-streams";
 const { from: copyFrom } = pgCopyStreams;
-
-// Show All Data
-export const showAllData = async (req, res) => {
-  try {
-    const query = "SELECT * FROM data_sekolah LIMIT 3";
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (error) {
-    console.error("Error fetching data:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
 
 /* helper */
 const waitFinish = (stream) =>
@@ -377,8 +365,6 @@ export const showDataSekolahByNama = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-import jwt from "jsonwebtoken";
 
 export const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;

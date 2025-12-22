@@ -4,7 +4,6 @@ import multer from "multer";
 import {
   insertExcelToDBPTK,
   insertExcelToDBDataSekolah,
-  showAllData,
   verifyToken,
   showDataSekolahByNama,
 } from "../controllers/excelController.js";
@@ -34,7 +33,6 @@ router.post(
   upload.single("file"),
   insertExcelToDBDataSekolah
 );
-router.get("/excel/show-all", showAllData);
 router.get(
   "/excel/show-data-sekolah-by-nama",
   verifyToken,
