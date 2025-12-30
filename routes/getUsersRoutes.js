@@ -1,11 +1,11 @@
-import express from 'express';
-import { approveUser } from '../controllers/adminController.js';
+import express from "express";
+import { getUsersList } from "../controllers/getUsersController.js";
 import { verifyToken } from "../controllers/excelController.js";
+
 const router = express.Router();
 
-// Endpoint hanya untuk super admin
-router.post(
-    "/approve-user",
+    router.get(
+    "/getUsers",
     verifyToken,
     (req, res, next) => {
         if (req.user.role !== "super_admin") {
@@ -15,7 +15,8 @@ router.post(
         }
         next();
     },
-    approveUser
+    getUsersList
     );
 
 export default router;
+
