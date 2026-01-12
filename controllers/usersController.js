@@ -72,4 +72,35 @@ const approveUser = async (req, res) => {
   }
 };
 
-export { getUsersList, approveUser };
+const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT id, nama, nip, role, status, created_at 
+      FROM public.users 
+      WHERE id = $1
+    `;
+
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: `User dengan ID ${id} tidak ditemukan`,
+      });
+    }
+
+    // Mengembalikan data user (baris pertama)
+    res.json({
+      message: "success",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("GET USER BY ID ERROR:", err);
+    res.status(500).json({
+      message: "Terjadi kesalahan pada server",
+      error: err.message,
+    });
+  }
+};
+
+export { getUsersList, approveUser, getUserById };
