@@ -1,6 +1,14 @@
 import express from "express";
-import { getSekolah, searchSekolah, getSekolahDetail, deleteAllSekolah } from "./sekolah.controller.js";
-import { authenticateToken, adminOnly } from "../../middleware/authMiddleware.js";
+import {
+  getSekolah,
+  searchSekolah,
+  getSekolahDetail,
+  deleteAllSekolah,
+} from "./sekolah.controller.js";
+import {
+  authenticateToken,
+  adminOnly,
+} from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 

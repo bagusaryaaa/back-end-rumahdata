@@ -37,151 +37,193 @@ function extractValue(cell) {
   return String(raw);
 }
 
-const uploadSekolah = async (req, res) => {
-  const filePath = req.file?.path;
-  if (!filePath) {
-    return res.status(400).json({ message: "File wajib diupload" });
-  }
+// const uploadSekolah = async (req, res) => {
+//   const filePath = req.file?.path;
+//   if (!filePath) {
+//     return res.status(400).json({ message: "File wajib diupload" });
+//   }
 
-  const ext = path.extname(req.file.originalname).toLowerCase();
-  const client = await pool.connect();
-  const tempCsv = ext === ".xlsx" ? filePath + ".csv" : filePath;
+//   const ext = path.extname(req.file.originalname).toLowerCase();
+//   const client = await pool.connect();
+//   const tempCsv = ext === ".xlsx" ? filePath + ".csv" : filePath;
 
-  try {
-    /* =========================
-       1. XLSX → CSV (STREAM)
-    ========================= */
-    if (ext === ".xlsx") {
-      const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath);
-      const csv = fs.createWriteStream(tempCsv);
+//   try {
+//     /* =========================
+//        1. XLSX → CSV (STREAM)
+//     ========================= */
+//     if (ext === ".xlsx") {
+//       const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath);
+//       const csv = fs.createWriteStream(tempCsv);
 
-      for await (const sheet of workbook) {
-        let headers = [];
+//       for await (const sheet of workbook) {
+//         let headers = [];
 
-        for await (const row of sheet) {
-          if (row.number === 1) {
-            headers = row.values.slice(1);
-            csv.write(headers.join(",") + "\n");
-            continue;
-          }
+//         for await (const row of sheet) {
+//           if (row.number === 1) {
+//             headers = row.values.slice(1);
+//             csv.write(headers.join(",") + "\n");
+//             continue;
+//           }
 
-          const line = headers
-            .map((_, i) => {
-              const cell = row.getCell(i + 1).value ?? "";
-              return `"${String(cell).replace(/"/g, '""')}"`;
-            })
-            .join(",");
+//           const line = headers
+//             .map((_, i) => {
+//               let cell = row.getCell(i + 1).value;
 
-          csv.write(line + "\n");
-        }
-        break;
-      }
+//               // Ubah cell kosong jadi "-" saat membaca Excel
+//               if (cell === null || cell === undefined || cell === "") {
+//                 cell = "-";
+//               }
 
-      csv.end();
-      await waitFinish(csv);
-    }
+//               return `"${String(cell).replace(/"/g, '""')}"`;
+//             })
+//             .join(",");
 
-    /* =========================
-       2. COPY → STAGING TABLE
-    ========================= */
-    await client.query("BEGIN");
+//           csv.write(line + "\n");
+//         }
+//         break; // Hanya ambil sheet pertama
+//       }
 
-    await client.query(`
-      DROP TABLE IF EXISTS data_sekolah_staging;
-      CREATE TEMP TABLE data_sekolah_staging
-      (LIKE data_sekolah INCLUDING DEFAULTS)
-    `);
+//       csv.end();
+//       await waitFinish(csv);
+//     }
 
-    const copyStream = client.query(
-      copyFrom(`
-        COPY data_sekolah_staging
-        FROM STDIN
-        WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
-      `),
-    );
+//     /* =========================
+//        2. COPY → STAGING TABLE
+//     ========================= */
+//     await client.query("BEGIN");
 
-    fs.createReadStream(tempCsv).pipe(copyStream);
-    await waitFinish(copyStream);
+//     await client.query(`
+//       DROP TABLE IF EXISTS data_sekolah_staging;
+//       CREATE TEMP TABLE data_sekolah_staging
+//       (LIKE data_sekolah INCLUDING DEFAULTS)
+//     `);
 
-    /* =========================
-       3. UPSERT KE data_sekolah
-    ========================= */
-    await client.query(`
-      INSERT INTO data_sekolah
-      SELECT DISTINCT ON (sekolah_id) *
-      FROM data_sekolah_staging
-      ORDER BY sekolah_id
-      ON CONFLICT (sekolah_id)
-      DO UPDATE SET
-        nama                          = EXCLUDED.nama,
-        npsn                          = EXCLUDED.npsn,
-        bentuk_pendidikan             = EXCLUDED.bentuk_pendidikan,
-        jenjang                       = EXCLUDED.jenjang,
-        alamat_jalan                  = EXCLUDED.alamat_jalan,
-        kode_desa_kelurahan           = EXCLUDED.kode_desa_kelurahan,
-        desa_kelurahan                = EXCLUDED.desa_kelurahan,
-        kode_kecamatan                = EXCLUDED.kode_kecamatan,
-        kecamatan                     = EXCLUDED.kecamatan,
-        kode_kabupaten                = EXCLUDED.kode_kabupaten,
-        kabupaten                     = EXCLUDED.kabupaten,
-        kode_provinsi                 = EXCLUDED.kode_provinsi,
-        provinsi                      = EXCLUDED.provinsi,
-        kode_pos                      = EXCLUDED.kode_pos,
-        email                         = EXCLUDED.email,
-        kebutuhan_khusus              = EXCLUDED.kebutuhan_khusus,
-        status_sekolah                = EXCLUDED.status_sekolah,
-        sk_pendirian_sekolah          = EXCLUDED.sk_pendirian_sekolah,
-        tanggal_sk_pendirian          = EXCLUDED.tanggal_sk_pendirian,
-        status_kepemilikan            = EXCLUDED.status_kepemilikan,
-        yayasan                       = EXCLUDED.yayasan,
-        sk_izin_operasional           = EXCLUDED.sk_izin_operasional,
-        tanggal_sk_izin_operasional   = EXCLUDED.tanggal_sk_izin_operasional,
-        rekening_atas_nama            = EXCLUDED.rekening_atas_nama,
-        mbs                           = EXCLUDED.mbs,
-        kode_registrasi               = EXCLUDED.kode_registrasi,
-        npwp                          = EXCLUDED.npwp,
-        nm_wp                         = EXCLUDED.nm_wp,
-        keaktifan                     = EXCLUDED.keaktifan,
-        wilayah_terpencil             = EXCLUDED.wilayah_terpencil,
-        wilayah_perbatasan            = EXCLUDED.wilayah_perbatasan,
-        wilayah_transmigrasi          = EXCLUDED.wilayah_transmigrasi,
-        wilayah_adat_terpencil        = EXCLUDED.wilayah_adat_terpencil,
-        wilayah_bencana_alam          = EXCLUDED.wilayah_bencana_alam,
-        wilayah_bencana_sosial        = EXCLUDED.wilayah_bencana_sosial,
-        partisipasi_bos               = EXCLUDED.partisipasi_bos,
-        akses_internet                = EXCLUDED.akses_internet,
-        akses_internet_2              = EXCLUDED.akses_internet_2,
-        akreditasi                    = EXCLUDED.akreditasi,
-        akreditasi_sp_tmt             = EXCLUDED.akreditasi_sp_tmt,
-        akreditasi_sp_sk              = EXCLUDED.akreditasi_sp_sk,
-        luas_tanah_milik              = EXCLUDED.luas_tanah_milik,
-        luas_tanah_bukan_milik        = EXCLUDED.luas_tanah_bukan_milik,
-        angkatan_psp                  = EXCLUDED.angkatan_psp
-    `);
+//     const copyStream = client.query(
+//       copyFrom(`
+//         COPY data_sekolah_staging
+//         FROM STDIN
+//         WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
+//       `),
+//     );
 
-    await client.query("COMMIT");
+//     fs.createReadStream(tempCsv).pipe(copyStream);
+//     await waitFinish(copyStream);
 
-    /* =========================
-       4. CLEAN FILE
-    ========================= */
-    fs.existsSync(filePath) && fs.unlinkSync(filePath);
-    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
+//     /* =========================
+//        3. UPSERT KE data_sekolah
+//     ========================= */
+//     await client.query(`
+//       INSERT INTO data_sekolah
+//       SELECT DISTINCT ON (sekolah_id) *
+//       FROM data_sekolah_staging
+//       ORDER BY sekolah_id
+//       ON CONFLICT (sekolah_id)
+//       DO UPDATE SET
+//         semester                        = EXCLUDED.semester,
+//         nama                            = EXCLUDED.nama,
+//         nama_nomenklatur                = EXCLUDED.nama_nomenklatur,
+//         nss                             = EXCLUDED.nss,
+//         npsn                            = EXCLUDED.npsn,
+//         bentuk_pendidikan               = EXCLUDED.bentuk_pendidikan,
+//         jenjang                         = EXCLUDED.jenjang,
+//         alamat_jalan                    = EXCLUDED.alamat_jalan,
+//         rt                              = EXCLUDED.rt,
+//         rw                              = EXCLUDED.rw,
+//         nama_dusun                      = EXCLUDED.nama_dusun,
+//         kode_desa_kelurahan             = EXCLUDED.kode_desa_kelurahan,
+//         desa_kelurahan                  = EXCLUDED.desa_kelurahan,
+//         kode_kecamatan                  = EXCLUDED.kode_kecamatan,
+//         kecamatan                       = EXCLUDED.kecamatan,
+//         kode_kabupaten                  = EXCLUDED.kode_kabupaten,
+//         kabupaten                       = EXCLUDED.kabupaten,
+//         kode_provinsi                   = EXCLUDED.kode_provinsi,
+//         provinsi                        = EXCLUDED.provinsi,
+//         kode_pos                        = EXCLUDED.kode_pos,
+//         lintang                         = EXCLUDED.lintang,
+//         bujur                           = EXCLUDED.bujur,
+//         nomor_telepon                   = EXCLUDED.nomor_telepon,
+//         nomor_fax                       = EXCLUDED.nomor_fax,
+//         email                           = EXCLUDED.email,
+//         website                         = EXCLUDED.website,
+//         kebutuhan_khusus                = EXCLUDED.kebutuhan_khusus,
+//         status_sekolah                  = EXCLUDED.status_sekolah,
+//         sk_pendirian_sekolah            = EXCLUDED.sk_pendirian_sekolah,
+//         tanggal_sk_pendirian            = EXCLUDED.tanggal_sk_pendirian,
+//         status_kepemilikan              = EXCLUDED.status_kepemilikan,
+//         yayasan                         = EXCLUDED.yayasan,
+//         sk_izin_operasional             = EXCLUDED.sk_izin_operasional,
+//         tanggal_sk_izin_operasional     = EXCLUDED.tanggal_sk_izin_operasional,
+//         no_rekening                     = EXCLUDED.no_rekening,
+//         nama_bank                       = EXCLUDED.nama_bank,
+//         cabang_kcp_unit                 = EXCLUDED.cabang_kcp_unit,
+//         rekening_atas_nama              = EXCLUDED.rekening_atas_nama,
+//         mbs                             = EXCLUDED.mbs,
+//         kode_registrasi                 = EXCLUDED.kode_registrasi,
+//         npwp                            = EXCLUDED.npwp,
+//         nm_wp                           = EXCLUDED.nm_wp,
+//         keaktifan                       = EXCLUDED.keaktifan,
+//         daya_listrik                    = EXCLUDED.daya_listrik,
+//         kontinuitas_listrik             = EXCLUDED.kontinuitas_listrik,
+//         jarak_listrik                   = EXCLUDED.jarak_listrik,
+//         wilayah_terpencil               = EXCLUDED.wilayah_terpencil,
+//         wilayah_perbatasan              = EXCLUDED.wilayah_perbatasan,
+//         wilayah_transmigrasi            = EXCLUDED.wilayah_transmigrasi,
+//         wilayah_adat_terpencil          = EXCLUDED.wilayah_adat_terpencil,
+//         wilayah_bencana_alam            = EXCLUDED.wilayah_bencana_alam,
+//         wilayah_bencana_sosial          = EXCLUDED.wilayah_bencana_sosial,
+//         partisipasi_bos                 = EXCLUDED.partisipasi_bos,
+//         waktu_penyelenggaraan           = EXCLUDED.waktu_penyelenggaraan,
+//         sumber_listrik                  = EXCLUDED.sumber_listrik,
+//         sertifikasi_iso                 = EXCLUDED.sertifikasi_iso,
+//         akses_internet                  = EXCLUDED.akses_internet,
+//         akses_internet_2                = EXCLUDED.akses_internet_2,
+//         akreditasi                      = EXCLUDED.akreditasi,
+//         akreditasi_sp_tmt               = EXCLUDED.akreditasi_sp_tmt,
+//         akreditasi_sp_sk                = EXCLUDED.akreditasi_sp_sk,
+//         luas_tanah_milik                = EXCLUDED.luas_tanah_milik,
+//         luas_tanah_bukan_milik          = EXCLUDED.luas_tanah_bukan_milik,
+//         angkatan_psp                    = EXCLUDED.angkatan_psp,
+//         internet_jenis_layanan          = EXCLUDED.internet_jenis_layanan,
+//         internet_jenis_koneksi          = EXCLUDED.internet_jenis_koneksi,
+//         internet_provider               = EXCLUDED.internet_provider,
+//         internet_bandwidth              = EXCLUDED.internet_bandwidth,
+//         internet_bandwidth_up           = EXCLUDED.internet_bandwidth_up,
+//         internet_bandwidth_down         = EXCLUDED.internet_bandwidth_down,
+//         internet_latency                = EXCLUDED.internet_latency,
+//         listrik_sumber                  = EXCLUDED.listrik_sumber,
+//         listrik_daya                    = EXCLUDED.listrik_daya,
+//         listrik_kontinuitas             = EXCLUDED.listrik_kontinuitas,
+//         listrik_id_pelanggan            = EXCLUDED.listrik_id_pelanggan,
+//         listrik_nomor_meter             = EXCLUDED.listrik_nomor_meter,
+//         listrik_jenis_meter             = EXCLUDED.listrik_jenis_meter,
+//         listrik_status_sambungan        = EXCLUDED.listrik_status_sambungan,
+//         listrik_utama                   = EXCLUDED.listrik_utama
+//     `);
 
-    res.json({
-      message: "Upload data sekolah berhasil (COPY + UPSERT)",
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
+//     await client.query("COMMIT");
 
-    fs.existsSync(filePath) && fs.unlinkSync(filePath);
-    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
+//     /* =========================
+//        4. CLEAN FILE
+//     ========================= */
+//     fs.existsSync(filePath) && fs.unlinkSync(filePath);
+//     ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
 
-    console.error(err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
-  }
-};
+//     res.json({
+//       message: "Upload data sekolah berhasil (COPY + UPSERT)",
+//     });
+//   } catch (err) {
+//     await client.query("ROLLBACK");
+
+//     // Tetap hapus file jika terjadi error agar tidak memenuhi storage
+//     fs.existsSync(filePath) && fs.unlinkSync(filePath);
+//     ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
+
+//     console.error(err);
+//     res.status(500).json({ message: err.message });
+//   } finally {
+//     client.release();
+//   }
+// };
 
 const uploadPtk = async (req, res) => {
   const filePath = req.file?.path;
@@ -364,9 +406,11 @@ const uploadPeserta = async (req, res) => {
 
       // Ambil header (baris pertama)
       const headerRow = sheet.getRow(1);
-      const headers = headerRow.values
-        .slice(1)
-        .map((h) => String(h || "").trim().toLowerCase());
+      const headers = headerRow.values.slice(1).map((h) =>
+        String(h || "")
+          .trim()
+          .toLowerCase(),
+      );
 
       csv.write(headers.join(",") + "\n");
 
@@ -397,25 +441,6 @@ const uploadPeserta = async (req, res) => {
         csv.write(line + "\n");
       });
 
-<<<<<<< HEAD:controllers/uploadController.js
-    csv.end();
-    await waitFinish(csv);
-      } else {
-        // Jika file asli CSV, intip baris pertamanya untuk cek delimiter
-        const rl = readline.createInterface({
-          input: fs.createReadStream(filePath),
-        });
-        for await (const line of rl) {
-  if (line.includes(";")) {
-    delimiter = ";";
-  } else if (line.includes("\t")) {
-    delimiter = "\t";
-  } else {
-    delimiter = ",";
-  }
-  break;
-}
-=======
       csv.end();
       await waitFinish(csv);
     } else {
@@ -428,7 +453,6 @@ const uploadPeserta = async (req, res) => {
           delimiter = ";";
         }
         break; // Cukup baca baris pertama lalu hentikan loop
->>>>>>> upstream/main:src/features/upload/upload.controller.js
       }
     }
 
@@ -450,33 +474,10 @@ const uploadPeserta = async (req, res) => {
       )
     `);
 
-    const firstLine = fs.readFileSync(tempCsv, "utf8").split("\n")[0];
-    const headers = firstLine
-      .split(delimiter)
-      .map((h) => h.replace(/"/g, "").trim().toLowerCase());
-
-    // Kolom yang diperbolehkan
-    const allowedColumns = [
-      "nama",
-      "kabupaten",
-      "instansi",
-      "jabatan",
-      "alamat",
-      "jenjang",
-      "peran",
-    ];
-
-    // Ambil hanya kolom yang valid
-    const validColumns = headers.filter((h) => allowedColumns.includes(h));
-
-    if (validColumns.length === 0) {
-      throw new Error("Tidak ada kolom peserta yang valid pada file");
-    }
-
-    // COPY dengan kolom dinamis
+    // Masukkan delimiter dinamis ke perintah COPY
     const copyStream = client.query(
       copyFrom(`
-        COPY peserta_staging (${validColumns.join(",")})
+        COPY peserta_staging (nama, kabupaten, instansi, jabatan, alamat, jenjang, peran)
         FROM STDIN WITH (FORMAT csv, HEADER true, ENCODING 'UTF8', DELIMITER '${delimiter}')
       `),
     );
@@ -533,7 +534,6 @@ const uploadPeserta = async (req, res) => {
   }
 };
 
-
 const uploadPpg = async (req, res) => {
   const filePath = req.file?.path;
 
@@ -557,9 +557,7 @@ const uploadPpg = async (req, res) => {
           if (row.number === 1) {
             headers = row.values
               .slice(1)
-              .map((h) =>
-                String(h).toLowerCase().replace(/\s+/g, "_")
-              );
+              .map((h) => String(h).toLowerCase().replace(/\s+/g, "_"));
 
             csv.write(headers.join(",") + "\n");
             continue;
@@ -583,7 +581,6 @@ const uploadPpg = async (req, res) => {
             })
             .join(",");
 
-
           csv.write(line + "\n");
         }
         break;
@@ -605,7 +602,7 @@ const uploadPpg = async (req, res) => {
         COPY ppg_staging
         FROM STDIN
         WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
-      `)
+      `),
     );
 
     fs.createReadStream(tempCsv).pipe(copyStream);
@@ -640,22 +637,16 @@ const uploadPpg = async (req, res) => {
 
     await client.query("COMMIT");
 
-
     fs.existsSync(filePath) && fs.unlinkSync(filePath);
-    ext === ".xlsx" &&
-      fs.existsSync(tempCsv) &&
-      fs.unlinkSync(tempCsv);
+    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
 
     res.json({ message: "Upload data PPG berhasil" });
-
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("UPLOAD ERROR:", err);
 
     fs.existsSync(filePath) && fs.unlinkSync(filePath);
-    ext === ".xlsx" &&
-      fs.existsSync(tempCsv) &&
-      fs.unlinkSync(tempCsv);
+    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
 
     res.status(500).json({
       message: "Gagal memproses file: " + err.message,
@@ -664,9 +655,6 @@ const uploadPpg = async (req, res) => {
     client.release();
   }
 };
-
-
-
 
 const uploadKegiatan = async (req, res) => {
   const filePath = req.file?.path;
@@ -840,4 +828,191 @@ const uploadKegiatan = async (req, res) => {
   }
 };
 
+const uploadSekolah = async (req, res) => {
+  const filePath = req.file?.path;
+  if (!filePath) {
+    return res.status(400).json({ message: "File wajib diupload" });
+  }
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const client = await pool.connect();
+  const tempCsv = ext === ".xlsx" ? filePath + ".csv" : filePath;
+
+  try {
+    /* =========================
+       1. XLSX → CSV (STREAM)
+    ========================= */
+    if (ext === ".xlsx") {
+      const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath);
+      const csv = fs.createWriteStream(tempCsv);
+
+      for await (const sheet of workbook) {
+        let headers = [];
+
+        for await (const row of sheet) {
+          if (row.number === 1) {
+            headers = row.values.slice(1);
+            csv.write(headers.join(",") + "\n");
+            continue;
+          }
+
+          const line = headers
+            .map((_, i) => {
+              let cell = row.getCell(i + 1).value;
+
+              // Ubah cell kosong jadi "-" saat membaca Excel
+              if (cell === null || cell === undefined || cell === "") {
+                cell = "-";
+              }
+
+              return `"${String(cell).replace(/"/g, '""')}"`;
+            })
+            .join(",");
+
+          csv.write(line + "\n");
+        }
+        break; // Hanya ambil sheet pertama
+      }
+
+      csv.end();
+      await waitFinish(csv);
+    }
+
+    /* =========================
+       2. COPY → STAGING TABLE
+    ========================= */
+    await client.query("BEGIN");
+
+    await client.query(`
+      DROP TABLE IF EXISTS data_sekolah_staging;
+      CREATE TEMP TABLE data_sekolah_staging
+      (LIKE data_sekolah INCLUDING DEFAULTS)
+    `);
+
+    const copyStream = client.query(
+      copyFrom(`
+        COPY data_sekolah_staging
+        FROM STDIN
+        WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
+      `),
+    );
+
+    fs.createReadStream(tempCsv).pipe(copyStream);
+    await waitFinish(copyStream);
+
+    /* =========================
+       3. UPSERT KE data_sekolah
+    ========================= */
+    await client.query(`
+      INSERT INTO data_sekolah
+      SELECT DISTINCT ON (sekolah_id) *
+      FROM data_sekolah_staging
+      ORDER BY sekolah_id
+      ON CONFLICT (sekolah_id)
+      DO UPDATE SET
+        semester                        = EXCLUDED.semester,
+        nama                            = EXCLUDED.nama,
+        nama_nomenklatur                = EXCLUDED.nama_nomenklatur,
+        nss                             = EXCLUDED.nss,
+        npsn                            = EXCLUDED.npsn,
+        bentuk_pendidikan               = EXCLUDED.bentuk_pendidikan,
+        jenjang                         = EXCLUDED.jenjang,
+        alamat_jalan                    = EXCLUDED.alamat_jalan,
+        rt                              = EXCLUDED.rt,
+        rw                              = EXCLUDED.rw,
+        nama_dusun                      = EXCLUDED.nama_dusun,
+        kode_desa_kelurahan             = EXCLUDED.kode_desa_kelurahan,
+        desa_kelurahan                  = EXCLUDED.desa_kelurahan,
+        kode_kecamatan                  = EXCLUDED.kode_kecamatan,
+        kecamatan                       = EXCLUDED.kecamatan,
+        kode_kabupaten                  = EXCLUDED.kode_kabupaten,
+        kabupaten                       = EXCLUDED.kabupaten,
+        kode_provinsi                   = EXCLUDED.kode_provinsi,
+        provinsi                        = EXCLUDED.provinsi,
+        kode_pos                        = EXCLUDED.kode_pos,
+        lintang                         = EXCLUDED.lintang,
+        bujur                           = EXCLUDED.bujur,
+        nomor_telepon                   = EXCLUDED.nomor_telepon,
+        nomor_fax                       = EXCLUDED.nomor_fax,
+        email                           = EXCLUDED.email,
+        website                         = EXCLUDED.website,
+        kebutuhan_khusus                = EXCLUDED.kebutuhan_khusus,
+        status_sekolah                  = EXCLUDED.status_sekolah,
+        sk_pendirian_sekolah            = EXCLUDED.sk_pendirian_sekolah,
+        tanggal_sk_pendirian            = EXCLUDED.tanggal_sk_pendirian,
+        status_kepemilikan              = EXCLUDED.status_kepemilikan,
+        yayasan                         = EXCLUDED.yayasan,
+        sk_izin_operasional             = EXCLUDED.sk_izin_operasional,
+        tanggal_sk_izin_operasional     = EXCLUDED.tanggal_sk_izin_operasional,
+        no_rekening                     = EXCLUDED.no_rekening,
+        nama_bank                       = EXCLUDED.nama_bank,
+        cabang_kcp_unit                 = EXCLUDED.cabang_kcp_unit,
+        rekening_atas_nama              = EXCLUDED.rekening_atas_nama,
+        mbs                             = EXCLUDED.mbs,
+        kode_registrasi                 = EXCLUDED.kode_registrasi,
+        npwp                            = EXCLUDED.npwp,
+        nm_wp                           = EXCLUDED.nm_wp,
+        keaktifan                       = EXCLUDED.keaktifan,
+        daya_listrik                    = EXCLUDED.daya_listrik,
+        kontinuitas_listrik             = EXCLUDED.kontinuitas_listrik,
+        jarak_listrik                   = EXCLUDED.jarak_listrik,
+        wilayah_terpencil               = EXCLUDED.wilayah_terpencil,
+        wilayah_perbatasan              = EXCLUDED.wilayah_perbatasan,
+        wilayah_transmigrasi            = EXCLUDED.wilayah_transmigrasi,
+        wilayah_adat_terpencil          = EXCLUDED.wilayah_adat_terpencil,
+        wilayah_bencana_alam            = EXCLUDED.wilayah_bencana_alam,
+        wilayah_bencana_sosial          = EXCLUDED.wilayah_bencana_sosial,
+        partisipasi_bos                 = EXCLUDED.partisipasi_bos,
+        waktu_penyelenggaraan           = EXCLUDED.waktu_penyelenggaraan,
+        sumber_listrik                  = EXCLUDED.sumber_listrik,
+        sertifikasi_iso                 = EXCLUDED.sertifikasi_iso,
+        akses_internet                  = EXCLUDED.akses_internet,
+        akses_internet_2                = EXCLUDED.akses_internet_2,
+        akreditasi                      = EXCLUDED.akreditasi,
+        akreditasi_sp_tmt               = EXCLUDED.akreditasi_sp_tmt,
+        akreditasi_sp_sk                = EXCLUDED.akreditasi_sp_sk,
+        luas_tanah_milik                = EXCLUDED.luas_tanah_milik,
+        luas_tanah_bukan_milik          = EXCLUDED.luas_tanah_bukan_milik,
+        angkatan_psp                    = EXCLUDED.angkatan_psp,
+        internet_jenis_layanan          = EXCLUDED.internet_jenis_layanan,
+        internet_jenis_koneksi          = EXCLUDED.internet_jenis_koneksi,
+        internet_provider               = EXCLUDED.internet_provider,
+        internet_bandwidth              = EXCLUDED.internet_bandwidth,
+        internet_bandwidth_up           = EXCLUDED.internet_bandwidth_up,
+        internet_bandwidth_down         = EXCLUDED.internet_bandwidth_down,
+        internet_latency                = EXCLUDED.internet_latency,
+        listrik_sumber                  = EXCLUDED.listrik_sumber,
+        listrik_daya                    = EXCLUDED.listrik_daya,
+        listrik_kontinuitas             = EXCLUDED.listrik_kontinuitas,
+        listrik_id_pelanggan            = EXCLUDED.listrik_id_pelanggan,
+        listrik_nomor_meter             = EXCLUDED.listrik_nomor_meter,
+        listrik_jenis_meter             = EXCLUDED.listrik_jenis_meter,
+        listrik_status_sambungan        = EXCLUDED.listrik_status_sambungan,
+        listrik_utama                   = EXCLUDED.listrik_utama
+    `);
+
+    await client.query("COMMIT");
+
+    /* =========================
+       4. CLEAN FILE
+    ========================= */
+    fs.existsSync(filePath) && fs.unlinkSync(filePath);
+    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
+
+    res.json({
+      message: "Upload data sekolah berhasil (COPY + UPSERT)",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+
+    // Tetap hapus file jika terjadi error agar tidak memenuhi storage
+    fs.existsSync(filePath) && fs.unlinkSync(filePath);
+    ext === ".xlsx" && fs.existsSync(tempCsv) && fs.unlinkSync(tempCsv);
+
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    client.release();
+  }
+};
 export { uploadPtk, uploadSekolah, uploadPeserta, uploadPpg, uploadKegiatan };
